@@ -1,0 +1,305 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f172a">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<title>دليل التلفزيون</title>
+<style>
+  :root {
+    --bg: #f1f5f9; --card: #ffffff; --text: #0f172a; --muted: #64748b;
+    --accent: #0284c7; --live: #dcfce7; --line: #e2e8f0;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f172a; --card: #1e293b; --text: #f1f5f9; --muted: #94a3b8;
+      --accent: #38bdf8; --live: #14532d; --line: #334155;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", Tahoma, sans-serif; }
+  header { position: sticky; top: 0; z-index: 5; background: var(--bg);
+    padding: calc(env(safe-area-inset-top, 0px) + 12px) 16px 8px;
+    display: flex; align-items: center; justify-content: space-between; }
+  h1 { font-size: 20px; margin: 0; }
+  #install { background: var(--accent); color: #fff; border: 0; border-radius: 8px; padding: 6px 12px; font: inherit; font-size: 14px; }
+  main { padding: 4px 12px calc(env(safe-area-inset-bottom, 0px) + 84px); max-width: 640px; margin: 0 auto; }
+  nav { position: fixed; bottom: 0; inset-inline: 0; display: flex; background: var(--card);
+    border-top: 1px solid var(--line); padding-bottom: env(safe-area-inset-bottom, 0px); }
+  nav button { flex: 1; background: none; border: 0; padding: 14px 4px; font: inherit; font-size: 15px; color: var(--muted); }
+  nav button.on { color: var(--accent); font-weight: 700; box-shadow: inset 0 -3px 0 var(--accent); }
+  .card { background: var(--card); border-radius: 12px; padding: 12px; margin: 8px 0; }
+  .row { display: flex; gap: 10px; align-items: center; background: var(--card);
+    border-radius: 12px; padding: 10px 12px; margin: 8px 0; }
+  .row.live { background: var(--live); }
+  .time { min-width: 64px; font-size: 14px; color: var(--accent); font-weight: 700; }
+  .info { flex: 1; min-width: 0; }
+  .title { font-size: 16px; overflow-wrap: anywhere; }
+  .meta { font-size: 13px; color: var(--muted); margin-top: 2px; }
+  .bar { height: 4px; background: var(--line); border-radius: 2px; margin-top: 6px; overflow: hidden; }
+  .bar > i { display: block; height: 100%; background: var(--accent); }
+  .star { background: none; border: 0; font-size: 24px; color: var(--accent); padding: 4px 6px; }
+  .chips { display: flex; gap: 8px; overflow-x: auto; padding: 4px 0 8px; }
+  .chip { flex: none; background: var(--card); color: var(--text); border: 1px solid var(--line);
+    border-radius: 999px; padding: 8px 14px; font: inherit; font-size: 14px; }
+  .chip.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .chlist button { display: block; width: 100%; text-align: start; background: var(--card); color: var(--text);
+    border: 0; border-radius: 12px; padding: 14px; margin: 8px 0; font: inherit; font-size: 16px; }
+  .msg { text-align: center; color: var(--muted); padding: 32px 12px; }
+  .msg button { margin-top: 12px; background: var(--accent); color: #fff; border: 0; border-radius: 8px; padding: 8px 16px; font: inherit; }
+  #toast { position: fixed; inset-inline: 16px; bottom: calc(env(safe-area-inset-bottom, 0px) + 76px);
+    background: var(--text); color: var(--bg); border-radius: 10px; padding: 10px 14px; font-size: 14px;
+    text-align: center; opacity: 0; pointer-events: none; transition: opacity .2s; }
+  #toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+<header>
+  <h1 id="ttl">دليل التلفزيون</h1>
+  <button id="install" hidden>تثبيت</button>
+</header>
+<main id="view"></main>
+<nav>
+  <button data-tab="now" class="on">الآن</button>
+  <button data-tab="channels">القنوات</button>
+  <button data-tab="favs">المفضلة</button>
+</nav>
+<div id="toast"></div>
+
+<script>
+const $ = s => document.querySelector(s);
+const view = $('#view');
+
+// ---------- أدوات ----------
+const el = (tag, cls, text) => {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text != null) e.textContent = text;
+  return e;
+};
+const getJSON = async path => {
+  const r = await fetch(path);
+  if (!r.ok) throw new Error(r.status);
+  return r.json();
+};
+const fmt = iso => new Date(iso).toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' });
+const dayKey = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+const dayName = (d, i) => i === 0 ? 'النهارده' : i === 1 ? 'بكرة' : d.toLocaleDateString('ar-EG', { weekday: 'long', day: 'numeric' });
+
+let toastTimer;
+function toast(t) {
+  const e = $('#toast');
+  e.textContent = t;
+  e.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => e.classList.remove('show'), 2600);
+}
+
+// ---------- المفضلة (محفوظة على الموبايل) ----------
+let favs = {};
+try { favs = JSON.parse(localStorage.getItem('favs') || '{}'); } catch (e) {}
+const saveFavs = () => { try { localStorage.setItem('favs', JSON.stringify(favs)); } catch (e) {} };
+const favKey = (cid, start) => cid + '|' + start;
+
+async function toggleFav(p, channelName, btn) {
+  const k = favKey(p.channel_id, p.start);
+  if (favs[k]) {
+    delete favs[k];
+    btn.textContent = '☆';
+  } else {
+    favs[k] = { key: k, title: p.title, channel: channelName, start: p.start, end: p.end };
+    btn.textContent = '★';
+    if ('Notification' in window && Notification.permission === 'default') {
+      await Notification.requestPermission();
+    }
+    if (!('Notification' in window) || Notification.permission !== 'granted') {
+      toast('اتحفظ في المفضلة، بس التنبيهات مش مفعّلة');
+    } else {
+      toast('هنفكرك قبل البرنامج بـ 10 دقايق (والتطبيق مفتوح)');
+    }
+  }
+  saveFavs();
+}
+
+// ---------- عناصر الواجهة ----------
+function programRow(p, channelName) {
+  const now = new Date(), s = new Date(p.start), e = new Date(p.end);
+  const live = s <= now && now < e;
+  const row = el('div', 'row' + (live ? ' live' : ''));
+  row.append(el('div', 'time', fmt(p.start)));
+
+  const info = el('div', 'info');
+  info.append(el('div', 'title', p.title));
+  const meta = [p.kind, p.year].filter(Boolean).join(' · ');
+  if (meta) info.append(el('div', 'meta', meta));
+  if (live) {
+    const bar = el('div', 'bar'), fill = document.createElement('i');
+    fill.style.width = Math.round((now - s) / (e - s) * 100) + '%';
+    bar.append(fill);
+    info.append(bar);
+  }
+  row.append(info);
+
+  const star = el('button', 'star', favs[favKey(p.channel_id, p.start)] ? '★' : '☆');
+  star.setAttribute('aria-label', 'مفضلة وتذكير');
+  star.onclick = () => toggleFav(p, channelName, star);
+  row.append(star);
+  return row;
+}
+
+function message(text, retry) {
+  const m = el('div', 'msg', text);
+  if (retry) {
+    const b = el('button', null, 'إعادة المحاولة');
+    b.onclick = retry;
+    m.append(document.createElement('br'), b);
+  }
+  view.replaceChildren(m);
+}
+
+// ---------- الشاشات ----------
+async function showNow() {
+  $('#ttl').textContent = 'على الهواء الآن';
+  message('جاري التحميل…');
+  try {
+    const list = await getJSON('/now');
+    if (!list.length) return message('مفيش بيانات دلوقتي. السيرفر محتاج يسحب الجداول الأول.');
+    const frag = document.createDocumentFragment();
+    for (const p of list) {
+      const card = el('div', 'card');
+      card.append(el('div', 'meta', p.channel_name));
+      card.append(programRow(p, p.channel_name));
+      card.lastChild.style.margin = '4px 0 0';
+      card.lastChild.style.padding = '4px 0';
+      card.lastChild.style.background = 'none';
+      frag.append(card);
+    }
+    view.replaceChildren(frag);
+  } catch (e) {
+    message('تعذّر الاتصال بالسيرفر', showNow);
+  }
+}
+
+async function showChannels() {
+  $('#ttl').textContent = 'القنوات';
+  message('جاري التحميل…');
+  try {
+    const list = await getJSON('/channels');
+    if (!list.length) return message('مفيش قنوات متخزنة لسه.');
+    const box = el('div', 'chlist');
+    for (const c of list) {
+      const b = el('button', null, c.name || ('قناة ' + c.id));
+      b.onclick = () => showSchedule(c, 0);
+      box.append(b);
+    }
+    view.replaceChildren(box);
+  } catch (e) {
+    message('تعذّر الاتصال بالسيرفر', showChannels);
+  }
+}
+
+async function showSchedule(ch, dayIndex) {
+  $('#ttl').textContent = ch.name || ('قناة ' + ch.id);
+  const days = [0, 1, 2, 3].map(i => { const d = new Date(); d.setDate(d.getDate() + i); return d; });
+
+  const chips = el('div', 'chips');
+  days.forEach((d, i) => {
+    const b = el('button', 'chip' + (i === dayIndex ? ' on' : ''), dayName(d, i));
+    b.onclick = () => showSchedule(ch, i);
+    chips.append(b);
+  });
+  const back = el('button', 'chip', '‹ القنوات');
+  back.onclick = showChannels;
+  chips.prepend(back);
+
+  const list = el('div');
+  list.append(el('div', 'msg', 'جاري التحميل…'));
+  view.replaceChildren(chips, list);
+
+  try {
+    const progs = await getJSON('/channels/' + ch.id + '/programs?date=' + dayKey(days[dayIndex]));
+    list.replaceChildren();
+    if (!progs.length) list.append(el('div', 'msg', 'مفيش برامج متخزنة لليوم ده.'));
+    for (const p of progs) list.append(programRow(p, ch.name));
+  } catch (e) {
+    list.replaceChildren(el('div', 'msg', 'تعذّر الاتصال بالسيرفر'));
+  }
+}
+
+function showFavs() {
+  $('#ttl').textContent = 'المفضلة';
+  const now = new Date();
+  // امسح اللي خلص
+  for (const k of Object.keys(favs)) if (new Date(favs[k].end) < now) delete favs[k];
+  saveFavs();
+  const items = Object.values(favs).sort((a, b) => new Date(a.start) - new Date(b.start));
+  if (!items.length) return message('اضغط ☆ جنب أي برنامج عشان يتضاف هنا ونفكرك بيه.');
+  const frag = document.createDocumentFragment();
+  for (const f of items) {
+    const row = el('div', 'row');
+    row.append(el('div', 'time', fmt(f.start)));
+    const info = el('div', 'info');
+    info.append(el('div', 'title', f.title));
+    info.append(el('div', 'meta', f.channel + ' · ' + new Date(f.start).toLocaleDateString('ar-EG', { weekday: 'long', day: 'numeric', month: 'long' })));
+    row.append(info);
+    const rm = el('button', 'star', '★');
+    rm.onclick = () => { delete favs[f.key]; saveFavs(); showFavs(); };
+    row.append(rm);
+    frag.append(row);
+  }
+  view.replaceChildren(frag);
+}
+
+const tabs = { now: showNow, channels: showChannels, favs: showFavs };
+document.querySelectorAll('nav button').forEach(b => {
+  b.onclick = () => {
+    document.querySelectorAll('nav button').forEach(x => x.classList.toggle('on', x === b));
+    tabs[b.dataset.tab]();
+  };
+});
+
+// ---------- التنبيهات (بتشتغل والتطبيق مفتوح) ----------
+const notified = new Set();
+async function checkReminders() {
+  if (!('Notification' in window) || Notification.permission !== 'granted') return;
+  const now = Date.now();
+  for (const f of Object.values(favs)) {
+    const mins = (new Date(f.start) - now) / 60000;
+    if (mins > 0 && mins <= 10 && !notified.has(f.key)) {
+      notified.add(f.key);
+      const opts = { body: f.channel + ' · ' + fmt(f.start), tag: f.key, lang: 'ar', dir: 'rtl', icon: 'icon-192.png' };
+      try {
+        const reg = await navigator.serviceWorker.ready;
+        reg.showNotification(f.title, opts);
+      } catch (e) {
+        new Notification(f.title, opts);
+      }
+    }
+  }
+}
+setInterval(checkReminders, 30000);
+checkReminders();
+
+// ---------- تثبيت كتطبيق + أوفلاين ----------
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+let installEvt = null;
+window.addEventListener('beforeinstallprompt', e => {
+  e.preventDefault();
+  installEvt = e;
+  $('#install').hidden = false;
+});
+$('#install').onclick = async () => {
+  if (!installEvt) return;
+  installEvt.prompt();
+  installEvt = null;
+  $('#install').hidden = true;
+};
+
+showNow();
+</script>
+</body>
+</html>
